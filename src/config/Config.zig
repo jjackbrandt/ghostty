@@ -3335,6 +3335,21 @@ keybind: Keybinds = .{},
 /// find false more visually appealing.
 @"macos-window-shadow": bool = true,
 
+/// (FORK ONLY — not in upstream Ghostty)
+///
+/// Whether to make Ghostty's native macOS tabs friendly to per-window
+/// tiling window managers (AeroSpace, yabai). When enabled (the default
+/// in this fork), only one NSWindow per tab group is exposed to the
+/// tiler and frame coupling is enforced across all members so the user
+/// can drag or resize any tab without the visible window escaping its
+/// tile.
+///
+/// Set to false to restore upstream native-tab behavior — Cmd+T will
+/// then open a new tile in your tiling WM as a separate window.
+///
+/// Has no effect on builds without a tiling WM running.
+@"macos-window-tabs-tiling-friendly": bool = true,
+
 /// If true, the macOS icon in the dock and app switcher will be hidden. This is
 /// mainly intended for those primarily using the quick-terminal mode.
 ///
