@@ -1,3 +1,15 @@
+<!-- FORK NOTICE -->
+> **This is a personal fork** maintained by [@jjackbrandt](https://github.com/jjackbrandt).
+> The only branch with changes is [`aerospace-tab-fix/frame-coupling`](../../tree/aerospace-tab-fix/frame-coupling), which adds a macOS patch so that ghostty's native tabs don't break tiling window managers like [AeroSpace](https://github.com/nikitabobko/AeroSpace) and yabai.
+>
+> The fix lives in `macos/Sources/Features/Terminal/Window Styles/TerminalWindow.swift` plus one line in `Ghostty-Info.plist`. Two layers:
+> 1. Hide non-active tab `NSWindow`s from per-window tilers via accessibility-attribute overrides plus a `GhosttyApplication` `NSApplication` subclass that filters `accessibilityWindows` to one rep per tab group.
+> 2. Enforce `NSWindowTabGroup`'s documented frame-coupling invariant by mirroring frames across every group member on `didMove`/`didResize` — closing the gap where AppKit doesn't enforce it during user-driven moves and resizes of non-active tabs.
+>
+> Not currently submitted upstream — there is no config flag yet (always-on for this fork). See the commit log on the branch for the path to the fix.
+>
+> Everything below is the upstream README, unchanged.
+
 <!-- LOGO -->
 <h1>
 <p align="center">
