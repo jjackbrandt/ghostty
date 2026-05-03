@@ -942,6 +942,21 @@ extension TerminalWindow {
         if !isTileRepresentative { return [] }
         return super.accessibilityChildren()
     }
+
+    /// Aerospace's `getWindowType` heuristic accepts a window if subrole is
+    /// standard OR the standard buttons are reachable OR focus indicators
+    /// are present. We already kill the first two for non-reps; lying about
+    /// focus/main here closes the third path so a non-rep tab cannot be
+    /// promoted to a tracked window when the user switches to it.
+    override func isAccessibilityFocused() -> Bool {
+        if !isTileRepresentative { return false }
+        return super.isAccessibilityFocused()
+    }
+
+    override func isAccessibilityMain() -> Bool {
+        if !isTileRepresentative { return false }
+        return super.isAccessibilityMain()
+    }
 }
 
 /// `NSApplication` subclass that pretends the rep is always the app's
