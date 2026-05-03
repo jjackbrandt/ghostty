@@ -957,6 +957,26 @@ extension TerminalWindow {
         if !isTileRepresentative { return false }
         return super.isAccessibilityMain()
     }
+
+    /// Block user-initiated title-bar drags on non-rep tabs.
+    ///
+    /// Non-rep tabs are invisible to the tiling WM, so the WM cannot snap
+    /// them back if the user drags them by the title bar. They share a
+    /// frame with the rep through `NSWindowTabGroup`, but only when the
+    /// rep moves does the frame propagate to the others — a drag of a
+    /// non-rep is its own NSWindow move that nothing constrains.
+    ///
+    /// Setting `isMovable` to false blocks the title-bar drag entirely.
+    /// Programmatic frame changes still work, so the WM continues to drive
+    /// the rep's geometry and tab-group frame coupling carries the visible
+    /// non-rep along. The user cannot drag a non-rep tab out of its tile.
+    override var isMovable: Bool {
+        get {
+            if !isTileRepresentative { return false }
+            return super.isMovable
+        }
+        set { super.isMovable = newValue }
+    }
 }
 
 /// `NSApplication` subclass that pretends the rep is always the app's
@@ -978,6 +998,15 @@ public class GhosttyApplication: NSApplication {
             return rep
         }
         return super.accessibilityFocusedWindow()
+    }
+
+    /// Some tilers fall back to `kAXMainWindowAttribute` if the focused
+    /// window query is null, so cover both with the same redirect.
+    public override func accessibilityMainWindow() -> Any? {
+        if let rep = TilingState.currentFocusedRep() {
+            return rep
+        }
+        return super.accessibilityMainWindow()
     }
 
     /// Aerospace iterates the app's windows via `kAXWindowsAttribute` and
