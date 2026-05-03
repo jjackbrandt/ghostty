@@ -864,52 +864,70 @@ extension TerminalWindow: TabTitleEditorDelegate {
 
 // MARK: Tiling Window Manager Friendliness
 
-/// Per-tab-group cache of the window that represents the group to tiling
-/// window managers. Sticky by identity. Seeded with `selectedWindow` (the
-/// AX-visible tab) on first query because aerospace and yabai discover
-/// windows via `kAXWindowsAttribute` which only enumerates the focused
-/// member of a tab group at a given moment. Weak keys/values; main thread
-/// only.
+/// Per-tab-group cache of the rep. Sticky by NSWindow identity, seeded with
+/// `selectedWindow` on first query. Weak keys/values; main thread only.
 fileprivate enum TilingState {
     static let repByGroup = NSMapTable<NSWindowTabGroup, NSWindow>(
         keyOptions: .weakMemory,
         valueOptions: .weakMemory
     )
+
+    /// Resolve the rep window of the focused tab group, if any.
+    /// Used by `GhosttyApplication.accessibilityFocusedWindow` so aerospace
+    /// always sees the rep as the app's focused window — workspace ops then
+    /// target the rep, and the tab group's frame coupling carries the
+    /// visible tab along.
+    static func currentFocusedRep() -> NSWindow? {
+        guard let key = NSApp.keyWindow as? TerminalWindow else { return nil }
+        guard let group = key.tabGroup, group.windows.count > 1 else { return nil }
+        return repByGroup.object(forKey: group)
+    }
 }
 
 extension TerminalWindow {
     /// Whether this window represents its tab group to tiling window managers.
     ///
     /// macOS-native tabs are separate `NSWindow` instances joined in an
-    /// `NSWindowTabGroup`. AppKit only exposes the focused member of a tab
-    /// group through `kAXWindowsAttribute` at any given moment, so the user-
-    /// visible "ghostty window" from a tiler's perspective is whichever tab
-    /// is currently selected.
+    /// `NSWindowTabGroup`. Tiling WMs (aerospace, yabai) classify each
+    /// window via `kAXSubroleAttribute` plus the presence of the standard
+    /// window buttons reachable through `accessibilityChildren()`. We make
+    /// every non-rep tab fail that classification by returning `.unknown`
+    /// for role/subrole and an empty children array, so the tiler's first
+    /// look at a new tab decides "not a window" and never tracks it.
     ///
-    /// One window per tab group is the tile representative. The rep is
-    /// sticky: the first NSWindow that joins the group locks in as rep and
-    /// stays rep until it closes. New tabs report a non-window AX
-    /// classification (role/subrole/element/children all suppressed), so the
-    /// tiler's classification at `AXWindowCreated` time skips them. When the
-    /// rep closes, `close()` promotes a successor and posts a synthetic
-    /// `AXWindowCreated` so the tiler re-discovers it.
+    /// `isAccessibilityElement` is intentionally NOT overridden — flipping
+    /// it to `false` breaks AppKit's own focused-window discovery (the rep
+    /// can't even be retrieved via `windows of process`), which kills
+    /// workspace operations as soon as the user switches to a non-rep tab.
+    ///
+    /// The rep is sticky: identity-based, so drag-reorder cannot shift it.
+    /// If the window is mid drag-detach (alone in a group but sharing a
+    /// `tabbingIdentifier` with sibling ghostty windows), we still report
+    /// non-rep so the dragged tab does not float into aerospace's tracked
+    /// set during the drag.
     fileprivate var isTileRepresentative: Bool {
-        guard let group = self.tabGroup, group.windows.count > 1 else {
-            return true
+        if let group = self.tabGroup, group.windows.count > 1 {
+            if let cached = TilingState.repByGroup.object(forKey: group) {
+                return cached === self
+            }
+            let initial = group.selectedWindow ?? self
+            TilingState.repByGroup.setObject(initial, forKey: group)
+            return initial === self
         }
-        if let cached = TilingState.repByGroup.object(forKey: group) {
-            return cached === self
+
+        // Alone in a (possibly transient) group. If we share a tabbing
+        // identifier with another ghostty window, we are mid drag-detach —
+        // do not claim rep.
+        let myIdent = self.tabbingIdentifier
+        for window in NSApp.windows {
+            guard let sibling = window as? TerminalWindow, sibling !== self else { continue }
+            if sibling.tabbingIdentifier == myIdent {
+                return false
+            }
         }
-        let initial = group.selectedWindow ?? self
-        TilingState.repByGroup.setObject(initial, forKey: group)
-        return initial === self
+        return true
     }
 
-    /// Suppress every AX signal a tiler's window-classifier might latch onto:
-    /// role, subrole, element flag, children. Aerospace's `getWindowType`
-    /// reads subrole *plus* the standard window buttons (close/minimize/zoom)
-    /// reachable through children, so suppressing children is necessary —
-    /// subrole alone is not enough.
     override func accessibilityRole() -> NSAccessibility.Role? {
         if !isTileRepresentative { return .unknown }
         return super.accessibilityRole()
@@ -920,13 +938,27 @@ extension TerminalWindow {
         return super.accessibilitySubrole()
     }
 
-    override func isAccessibilityElement() -> Bool {
-        if !isTileRepresentative { return false }
-        return super.isAccessibilityElement()
-    }
-
     override func accessibilityChildren() -> [Any]? {
         if !isTileRepresentative { return [] }
         return super.accessibilityChildren()
+    }
+}
+
+/// `NSApplication` subclass that pretends the rep is always the app's
+/// focused window. Without this, switching to a non-rep tab leaves
+/// aerospace's per-app focus pointer pointing at a window aerospace
+/// doesn't track, breaking workspace ops, focus-follows-mouse, and the
+/// "stay-on-workspace" hide behavior.
+///
+/// Wired in via `NSPrincipalClass = "Ghostty.GhosttyApplication"` in
+/// `Ghostty-Info.plist`.
+@objc(GhosttyApplication)
+@MainActor
+public class GhosttyApplication: NSApplication {
+    public override func accessibilityFocusedWindow() -> Any? {
+        if let rep = TilingState.currentFocusedRep() {
+            return rep
+        }
+        return super.accessibilityFocusedWindow()
     }
 }
