@@ -970,10 +970,34 @@ extension TerminalWindow {
 @objc(GhosttyApplication)
 @MainActor
 public class GhosttyApplication: NSApplication {
+    /// Aerospace queries `kAXFocusedWindowAttribute` on the app to find the
+    /// focused window. Return the rep so aerospace's per-app focus pointer
+    /// always lands on a window it tracks, no matter which tab is keyWindow.
     public override func accessibilityFocusedWindow() -> Any? {
         if let rep = TilingState.currentFocusedRep() {
             return rep
         }
         return super.accessibilityFocusedWindow()
+    }
+
+    /// Aerospace iterates the app's windows via `kAXWindowsAttribute` and
+    /// classifies each. Aerospace's `isDialogHeuristic` returns true for any
+    /// ghostty window with non-standard subrole — i.e. exactly our non-rep
+    /// tabs — and a dialog gets floating layout. Filter non-rep tabs out of
+    /// the enumeration entirely so the classifier never sees them.
+    public override func accessibilityWindows() -> [Any]? {
+        let all = super.accessibilityWindows() ?? []
+        return all.filter { window in
+            guard let term = window as? TerminalWindow else { return true }
+            return term.isTileRepresentative
+        }
+    }
+
+    public override func accessibilityChildren() -> [Any]? {
+        let all = super.accessibilityChildren() ?? []
+        return all.filter { child in
+            guard let term = child as? TerminalWindow else { return true }
+            return term.isTileRepresentative
+        }
     }
 }
