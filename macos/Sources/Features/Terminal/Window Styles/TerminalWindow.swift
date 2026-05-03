@@ -94,6 +94,26 @@ class TerminalWindow: NSWindow {
             self.configureTabContextMenuIfNeeded(menu)
         }
 
+        // Frame-sync within tab groups. NSWindowTabGroup documents that all
+        // members share a frame, but does not enforce it during user-driven
+        // moves and resizes of non-active tabs. Without enforcement, the
+        // tiling WM constrains the rep but the visible (non-active) tab can
+        // float free. We close that gap by mirroring frame changes across
+        // every member of the tab group.
+        // See `// MARK: Tiling Window Manager Friendliness` at end of file.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTilingFrameSync(_:)),
+            name: NSWindow.didMoveNotification,
+            object: self
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTilingFrameSync(_:)),
+            name: NSWindow.didResizeNotification,
+            object: self
+        )
+
         // This is required so that window restoration properly creates our tabs
         // again. I'm not sure why this is required. If you don't do this, then
         // tabs restore as separate windows.
@@ -958,24 +978,39 @@ extension TerminalWindow {
         return super.isAccessibilityMain()
     }
 
-    /// Block user-initiated title-bar drags on non-rep tabs.
+    /// Mirror this window's frame to every other member of its tab group.
     ///
-    /// Non-rep tabs are invisible to the tiling WM, so the WM cannot snap
-    /// them back if the user drags them by the title bar. They share a
-    /// frame with the rep through `NSWindowTabGroup`, but only when the
-    /// rep moves does the frame propagate to the others — a drag of a
-    /// non-rep is its own NSWindow move that nothing constrains.
+    /// Why this exists at all: `NSWindowTabGroup` documents that every
+    /// member of a tab group shares a single frame, but AppKit only
+    /// enforces that during programmatic frame setters and during drags of
+    /// the *active* tab. When the user drags a non-active tab (which is
+    /// the visible window when a tiling WM has hidden the rep behind it),
+    /// AppKit moves only that one window — the rep stays put, the tile WM
+    /// snap-back never reaches the visible window, and the user can drag
+    /// or resize the visible tab off the tile.
     ///
-    /// Setting `isMovable` to false blocks the title-bar drag entirely.
-    /// Programmatic frame changes still work, so the WM continues to drive
-    /// the rep's geometry and tab-group frame coupling carries the visible
-    /// non-rep along. The user cannot drag a non-rep tab out of its tile.
-    override var isMovable: Bool {
-        get {
-            if !isTileRepresentative { return false }
-            return super.isMovable
+    /// The fix is to enforce the documented invariant ourselves: whenever
+    /// any member of a tab group moves or resizes, force every other
+    /// member to match. Termination is guaranteed by the frame-equality
+    /// check — once all members agree, no further `setFrame` calls fire.
+    ///
+    /// Interaction with the tiling WM:
+    ///   - User drags non-rep → handler syncs all → rep moves → tiler
+    ///     observes rep move and snaps it back → rep's `didMove` fires →
+    ///     handler syncs all → visible non-rep snaps back. The tiler's
+    ///     constraint reaches the visible window through this path.
+    ///   - User drags rep → handler syncs all immediately → tiler snaps
+    ///     rep back → handler syncs all again → settles.
+    ///   - Tiler programmatically resizes rep → rep's `didResize` fires →
+    ///     handler syncs all to new size. All members track the tile.
+    @objc fileprivate func handleTilingFrameSync(_ notification: Notification) {
+        guard let group = self.tabGroup, group.windows.count > 1 else { return }
+        let myFrame = self.frame
+        for window in group.windows where window !== self {
+            if window.frame != myFrame {
+                window.setFrame(myFrame, display: false)
+            }
         }
-        set { super.isMovable = newValue }
     }
 }
 
