@@ -6,7 +6,7 @@
 > 1. Hide non-active tab `NSWindow`s from per-window tilers via accessibility-attribute overrides plus a `GhosttyApplication` `NSApplication` subclass that filters `accessibilityWindows` to one rep per tab group.
 > 2. Enforce `NSWindowTabGroup`'s documented frame-coupling invariant by mirroring frames across every group member on `didMove`/`didResize` — closing the gap where AppKit doesn't enforce it during user-driven moves and resizes of non-active tabs.
 >
-> Not currently submitted upstream — there is no config flag yet (always-on for this fork). See the commit log on the branch for the path to the fix.
+> Wired to a config flag: `macos-window-tabs-tiling-friendly` (default `true` in this fork). Set to `false` in your `ghostty/config` file to restore upstream native-tab behavior. Not currently submitted upstream — see the commit log on the branch for the path to the fix.
 >
 > Everything below is the upstream README, unchanged.
 
