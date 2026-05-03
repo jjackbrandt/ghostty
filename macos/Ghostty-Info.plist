@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSPrincipalClass</key>
-	<string>Ghostty.GhosttyApplication</string>
+	<string>GhosttyApplication</string>
 	<key>NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac</key>
 	<true/>
 	<key>NSDockTilePlugIn</key>
