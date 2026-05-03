@@ -408,6 +408,15 @@ extension Ghostty {
             return v
         }
 
+        // FORK ONLY — see Config.zig for description.
+        var macosWindowTabsTilingFriendly: Bool {
+            guard let config = self.config else { return true }
+            var v = true
+            let key = "macos-window-tabs-tiling-friendly"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+
         var macosIcon: MacOSIcon {
             let defaultValue = MacOSIcon.official
             guard let config = self.config else { return defaultValue }

@@ -902,6 +902,15 @@ fileprivate enum TilingState {
         guard let group = key.tabGroup, group.windows.count > 1 else { return nil }
         return repByGroup.object(forKey: group)
     }
+
+    /// Whether the tiling-friendly behavior is enabled per the user's config.
+    /// Reads `macos-window-tabs-tiling-friendly` from the live ghostty config.
+    /// Default is true; flipping to false restores upstream native-tab
+    /// behavior (every tab visible to the tiler, no frame-sync enforcement).
+    static var enabled: Bool {
+        guard let appDelegate = NSApp.delegate as? AppDelegate else { return true }
+        return appDelegate.ghostty.config.macosWindowTabsTilingFriendly
+    }
 }
 
 extension TerminalWindow {
@@ -926,6 +935,10 @@ extension TerminalWindow {
     /// non-rep so the dragged tab does not float into aerospace's tracked
     /// set during the drag.
     fileprivate var isTileRepresentative: Bool {
+        // When the feature is disabled, every window is "rep" — no AX
+        // suppression, no frame sync. Behavior matches upstream.
+        if !TilingState.enabled { return true }
+
         if let group = self.tabGroup, group.windows.count > 1 {
             if let cached = TilingState.repByGroup.object(forKey: group) {
                 return cached === self
@@ -1004,6 +1017,7 @@ extension TerminalWindow {
     ///   - Tiler programmatically resizes rep → rep's `didResize` fires →
     ///     handler syncs all to new size. All members track the tile.
     @objc fileprivate func handleTilingFrameSync(_ notification: Notification) {
+        guard TilingState.enabled else { return }
         guard let group = self.tabGroup, group.windows.count > 1 else { return }
         let myFrame = self.frame
         for window in group.windows where window !== self {
@@ -1029,7 +1043,7 @@ public class GhosttyApplication: NSApplication {
     /// focused window. Return the rep so aerospace's per-app focus pointer
     /// always lands on a window it tracks, no matter which tab is keyWindow.
     public override func accessibilityFocusedWindow() -> Any? {
-        if let rep = TilingState.currentFocusedRep() {
+        if TilingState.enabled, let rep = TilingState.currentFocusedRep() {
             return rep
         }
         return super.accessibilityFocusedWindow()
@@ -1038,7 +1052,7 @@ public class GhosttyApplication: NSApplication {
     /// Some tilers fall back to `kAXMainWindowAttribute` if the focused
     /// window query is null, so cover both with the same redirect.
     public override func accessibilityMainWindow() -> Any? {
-        if let rep = TilingState.currentFocusedRep() {
+        if TilingState.enabled, let rep = TilingState.currentFocusedRep() {
             return rep
         }
         return super.accessibilityMainWindow()
@@ -1051,6 +1065,7 @@ public class GhosttyApplication: NSApplication {
     /// the enumeration entirely so the classifier never sees them.
     public override func accessibilityWindows() -> [Any]? {
         let all = super.accessibilityWindows() ?? []
+        guard TilingState.enabled else { return all }
         return all.filter { window in
             guard let term = window as? TerminalWindow else { return true }
             return term.isTileRepresentative
@@ -1059,6 +1074,7 @@ public class GhosttyApplication: NSApplication {
 
     public override func accessibilityChildren() -> [Any]? {
         let all = super.accessibilityChildren() ?? []
+        guard TilingState.enabled else { return all }
         return all.filter { child in
             guard let term = child as? TerminalWindow else { return true }
             return term.isTileRepresentative
