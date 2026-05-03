@@ -194,7 +194,24 @@ class TerminalWindow: NSWindow {
     override func close() {
         tabTitleEditor.finishEditing(commit: true)
         NotificationCenter.default.post(name: Self.terminalWillCloseNotification, object: self)
+
+        // If this window was the tile representative and we have surviving
+        // tabs, hand the role to the successor that AppKit will select.
+        // The synthetic AXWindowCreated lets a tiling WM (aerospace, yabai)
+        // re-discover the new rep — without it the tile slot stays empty
+        // because tilers observe creation but not subrole flips.
+        // See `// MARK: Tiling Window Manager Friendliness` at end of file.
+        let oldRep: NSWindow? = isTileRepresentative ? self : nil
+        let group = self.tabGroup
         super.close()
+        if oldRep != nil, let group, group.windows.count >= 1 {
+            DispatchQueue.main.async {
+                let successor = group.selectedWindow ?? group.windows.first
+                guard let successor else { return }
+                TilingState.repByGroup.setObject(successor, forKey: group)
+                NSAccessibility.post(element: successor, notification: .created)
+            }
+        }
     }
 
     override func becomeKey() {
@@ -842,5 +859,74 @@ extension TerminalWindow: TabTitleEditorDelegate {
               let focusedSurface = controller.focusedSurface
         else { return }
         makeFirstResponder(focusedSurface)
+    }
+}
+
+// MARK: Tiling Window Manager Friendliness
+
+/// Per-tab-group cache of the window that represents the group to tiling
+/// window managers. Sticky by identity. Seeded with `selectedWindow` (the
+/// AX-visible tab) on first query because aerospace and yabai discover
+/// windows via `kAXWindowsAttribute` which only enumerates the focused
+/// member of a tab group at a given moment. Weak keys/values; main thread
+/// only.
+fileprivate enum TilingState {
+    static let repByGroup = NSMapTable<NSWindowTabGroup, NSWindow>(
+        keyOptions: .weakMemory,
+        valueOptions: .weakMemory
+    )
+}
+
+extension TerminalWindow {
+    /// Whether this window represents its tab group to tiling window managers.
+    ///
+    /// macOS-native tabs are separate `NSWindow` instances joined in an
+    /// `NSWindowTabGroup`. AppKit only exposes the focused member of a tab
+    /// group through `kAXWindowsAttribute` at any given moment, so the user-
+    /// visible "ghostty window" from a tiler's perspective is whichever tab
+    /// is currently selected.
+    ///
+    /// One window per tab group is the tile representative. The rep is
+    /// sticky: the first NSWindow that joins the group locks in as rep and
+    /// stays rep until it closes. New tabs report a non-window AX
+    /// classification (role/subrole/element/children all suppressed), so the
+    /// tiler's classification at `AXWindowCreated` time skips them. When the
+    /// rep closes, `close()` promotes a successor and posts a synthetic
+    /// `AXWindowCreated` so the tiler re-discovers it.
+    fileprivate var isTileRepresentative: Bool {
+        guard let group = self.tabGroup, group.windows.count > 1 else {
+            return true
+        }
+        if let cached = TilingState.repByGroup.object(forKey: group) {
+            return cached === self
+        }
+        let initial = group.selectedWindow ?? self
+        TilingState.repByGroup.setObject(initial, forKey: group)
+        return initial === self
+    }
+
+    /// Suppress every AX signal a tiler's window-classifier might latch onto:
+    /// role, subrole, element flag, children. Aerospace's `getWindowType`
+    /// reads subrole *plus* the standard window buttons (close/minimize/zoom)
+    /// reachable through children, so suppressing children is necessary —
+    /// subrole alone is not enough.
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        if !isTileRepresentative { return .unknown }
+        return super.accessibilityRole()
+    }
+
+    override func accessibilitySubrole() -> NSAccessibility.Subrole? {
+        if !isTileRepresentative { return .unknown }
+        return super.accessibilitySubrole()
+    }
+
+    override func isAccessibilityElement() -> Bool {
+        if !isTileRepresentative { return false }
+        return super.isAccessibilityElement()
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        if !isTileRepresentative { return [] }
+        return super.accessibilityChildren()
     }
 }
