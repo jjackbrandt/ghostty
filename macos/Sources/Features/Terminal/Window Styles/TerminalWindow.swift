@@ -886,7 +886,7 @@ extension TerminalWindow: TabTitleEditorDelegate {
 
 /// Per-tab-group cache of the rep. Sticky by NSWindow identity, seeded with
 /// `selectedWindow` on first query. Weak keys/values; main thread only.
-fileprivate enum TilingState {
+enum TilingState {
     static let repByGroup = NSMapTable<NSWindowTabGroup, NSWindow>(
         keyOptions: .weakMemory,
         valueOptions: .weakMemory
@@ -910,6 +910,13 @@ fileprivate enum TilingState {
     static var enabled: Bool {
         guard let appDelegate = NSApp.delegate as? AppDelegate else { return true }
         return appDelegate.ghostty.config.macosWindowTabsTilingFriendly
+    }
+
+    static func isDragDetachSibling(
+        sharesTabbingIdentifier: Bool,
+        isVisible: Bool
+    ) -> Bool {
+        sharesTabbingIdentifier && isVisible
     }
 }
 
@@ -954,7 +961,10 @@ extension TerminalWindow {
         let myIdent = self.tabbingIdentifier
         for window in NSApp.windows {
             guard let sibling = window as? TerminalWindow, sibling !== self else { continue }
-            if sibling.tabbingIdentifier == myIdent {
+            if TilingState.isDragDetachSibling(
+                sharesTabbingIdentifier: sibling.tabbingIdentifier == myIdent,
+                isVisible: sibling.isVisible
+            ) {
                 return false
             }
         }
