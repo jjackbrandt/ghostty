@@ -37,6 +37,10 @@ class TerminalWindow: NSWindow {
     /// Sets up our tab context menu
     private var tabMenuObserver: NSObjectProtocol?
 
+    /// Last multi-window tab group this window represented or belonged to.
+    /// A different current group proves that AppKit just detached the window.
+    private weak var tilingTabGroup: NSWindowTabGroup?
+
     /// Handles inline tab title editing for this host window.
     private(set) lazy var tabTitleEditor = TabTitleEditor(
         hostWindow: self,
@@ -221,10 +225,9 @@ class TerminalWindow: NSWindow {
         // re-discover the new rep — without it the tile slot stays empty
         // because tilers observe creation but not subrole flips.
         // See `// MARK: Tiling Window Manager Friendliness` at end of file.
-        let oldRep: NSWindow? = isTileRepresentative ? self : nil
-        let group = self.tabGroup
+        let group = TilingState.enabled && isTileRepresentative ? self.tabGroup : nil
         super.close()
-        if oldRep != nil, let group, group.windows.count >= 1 {
+        if let group, group.windows.count >= 1 {
             DispatchQueue.main.async {
                 let successor = group.selectedWindow ?? group.windows.first
                 guard let successor else { return }
@@ -912,12 +915,6 @@ enum TilingState {
         return appDelegate.ghostty.config.macosWindowTabsTilingFriendly
     }
 
-    static func isDragDetachSibling(
-        sharesTabbingIdentifier: Bool,
-        isVisible: Bool
-    ) -> Bool {
-        sharesTabbingIdentifier && isVisible
-    }
 }
 
 extension TerminalWindow {
@@ -937,16 +934,16 @@ extension TerminalWindow {
     /// workspace operations as soon as the user switches to a non-rep tab.
     ///
     /// The rep is sticky: identity-based, so drag-reorder cannot shift it.
-    /// If the window is mid drag-detach (alone in a group but sharing a
-    /// `tabbingIdentifier` with sibling ghostty windows), we still report
-    /// non-rep so the dragged tab does not float into aerospace's tracked
-    /// set during the drag.
+    /// If the window moves from a multi-window group to a different singleton
+    /// group during drag-detach, we still report non-rep so the dragged tab
+    /// does not float into aerospace's tracked set during the drag.
     fileprivate var isTileRepresentative: Bool {
         // When the feature is disabled, every window is "rep" — no AX
         // suppression, no frame sync. Behavior matches upstream.
         if !TilingState.enabled { return true }
 
         if let group = self.tabGroup, group.windows.count > 1 {
+            tilingTabGroup = group
             if let cached = TilingState.repByGroup.object(forKey: group) {
                 return cached === self
             }
@@ -955,18 +952,11 @@ extension TerminalWindow {
             return initial === self
         }
 
-        // Alone in a (possibly transient) group. If we share a tabbing
-        // identifier with another ghostty window, we are mid drag-detach —
-        // do not claim rep.
-        let myIdent = self.tabbingIdentifier
-        for window in NSApp.windows {
-            guard let sibling = window as? TerminalWindow, sibling !== self else { continue }
-            if TilingState.isDragDetachSibling(
-                sharesTabbingIdentifier: sibling.tabbingIdentifier == myIdent,
-                isVisible: sibling.isVisible
-            ) {
-                return false
-            }
+        // AppKit gives a detached tab a new singleton group. Remembering the
+        // multi-window group proves this is a detach transition rather than an
+        // unrelated standalone window with the same tabbing identifier.
+        if let tilingTabGroup, tilingTabGroup !== self.tabGroup {
+            return false
         }
         return true
     }
@@ -1044,7 +1034,7 @@ extension TerminalWindow {
 /// doesn't track, breaking workspace ops, focus-follows-mouse, and the
 /// "stay-on-workspace" hide behavior.
 ///
-/// Wired in via `NSPrincipalClass = "Ghostty.GhosttyApplication"` in
+/// Wired in via `NSPrincipalClass = "GhosttyApplication"` in
 /// `Ghostty-Info.plist`.
 @objc(GhosttyApplication)
 @MainActor
