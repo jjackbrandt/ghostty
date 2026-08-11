@@ -1147,25 +1147,29 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     override func showWindow(_ sender: Any?) {
         guard let terminalWindow = window as? TerminalWindow else { return }
 
-        // Set the initial window position. This must happen after the window
-        // is fully set up (content view, toolbar, default size) so that
-        // decorations added by subclass awakeFromNib (e.g. toolbar for tabs
-        // style) don't change the frame after the position is restored.
-        let originChanged = terminalWindow.setInitialWindowPosition(
-            x: derivedConfig.windowPositionX,
-            y: derivedConfig.windowPositionY,
-        )
-        let restored = LastWindowPosition.shared.restore(
-            terminalWindow,
-            origin: !originChanged,
-            size: defaultSize == nil,
-        )
+        // A window already attached as a tab shares its frame with the existing
+        // group, so standalone placement would reposition every member.
+        if terminalWindow.tabbedWindows?.count ?? 1 == 1 {
+            // Set the initial window position. This must happen after the window
+            // is fully set up (content view, toolbar, default size) so that
+            // decorations added by subclass awakeFromNib (e.g. toolbar for tabs
+            // style) don't change the frame after the position is restored.
+            let originChanged = terminalWindow.setInitialWindowPosition(
+                x: derivedConfig.windowPositionX,
+                y: derivedConfig.windowPositionY,
+            )
+            let restored = LastWindowPosition.shared.restore(
+                terminalWindow,
+                origin: !originChanged,
+                size: defaultSize == nil,
+            )
 
-        // If nothing is changed for the frame,
-        // we should center the window
-        if !originChanged, !restored {
-            // This doesn't work in `windowDidLoad` somehow
-            terminalWindow.center()
+            // If nothing is changed for the frame,
+            // we should center the window
+            if !originChanged, !restored {
+                // This doesn't work in `windowDidLoad` somehow
+                terminalWindow.center()
+            }
         }
 
         super.showWindow(sender)
